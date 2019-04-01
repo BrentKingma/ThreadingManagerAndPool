@@ -1,62 +1,82 @@
 #include "pch.h"
 #include "ThreadPool.h"
 
-std::vector<std::shared_ptr<std::thread>> MyEngine::ThreadPool::m_threadPool;
-std::queue<MyEngine::ThreadPool::Task> MyEngine::ThreadPool::m_tasks;
-std::condition_variable MyEngine::ThreadPool::m_eventVar;
-std::mutex MyEngine::ThreadPool::m_eventMutex;
-int MyEngine::ThreadPool::m_numThreads;
-bool MyEngine::ThreadPool::m_stop;
-
-void MyEngine::ThreadPool::init()
+namespace MyThreading
 {
-	for (int i = 0; i < 10; i++)
+	std::vector<std::shared_ptr<std::thread>> ThreadPool::m_threadPool;
+	std::queue<ThreadPool::Task> ThreadPool::m_tasks;
+	std::condition_variable ThreadPool::m_eventVar;
+	std::mutex ThreadPool::m_eventMutex;
+	int ThreadPool::m_numThreads;
+	bool ThreadPool::m_stop;
+
+	void ThreadPool::init()
 	{
-		m_threadPool.push_back(std::make_shared<std::thread>([=] {
-			while (true)
-			{
-				Task task;
+		for (int i = 0; i < 10; i++)
+		{
+			m_threadPool.push_back(std::make_shared<std::thread>([=] {
+				while (true)
 				{
-					std::unique_lock<std::mutex> lock{ m_eventMutex };
-					//Blocking call, passes when conditional variable is notified
-					m_eventVar.wait(lock, [=] { return m_stop || !m_tasks.empty(); });
+					Task task;
+					{
+						std::unique_lock<std::mutex> lock{ m_eventMutex };
+						//Blocking call, passes when conditional variable is notified
+						m_eventVar.wait(lock, [=] { return m_stop || !m_tasks.empty(); });
 
-					if (m_stop && m_tasks.empty()) break;
+						if (m_stop && m_tasks.empty()) break;
 
-					task = std::move(m_tasks.front());
-					m_tasks.pop();
+						task = std::move(m_tasks.front());
+						m_tasks.pop();
+					}
+
+					task();
 				}
-
-				task();
-			}
-		}));
+			}));
+		}
+		m_numThreads = 10;
 	}
-	m_numThreads = 10;
-}
-void MyEngine::ThreadPool::init(int num)
-{
-	for (int i = 0; i < num; i++)
+	void ThreadPool::init(int num)
 	{
-		m_threadPool.push_back(std::make_shared<std::thread>(std::thread()));
+		for (int i = 0; i < num; i++)
+		{
+			m_threadPool.push_back(std::make_shared<std::thread>([=] {
+				while (true)
+				{
+					Task task;
+					{
+						std::unique_lock<std::mutex> lock{ m_eventMutex };
+						//Blocking call, passes when conditional variable is notified
+						m_eventVar.wait(lock, [=] { return m_stop || !m_tasks.empty(); });
+
+						if (m_stop && m_tasks.empty()) break;
+
+						task = std::move(m_tasks.front());
+						m_tasks.pop();
+					}
+
+					task();
+				}
+			}));
+		}
+		m_numThreads = num;
 	}
-	m_numThreads = num;
-}
-void MyEngine::ThreadPool::kill()
-{
+	void ThreadPool::kill()
 	{
-		std::unique_lock<std::mutex> lock{ m_eventMutex };
-		m_stop = true;
+		{
+			std::unique_lock<std::mutex> lock{ m_eventMutex };
+			m_stop = true;
+		}
+
+		m_eventVar.notify_all();
+		for (int i = 0; i < m_numThreads; i++)
+		{
+			m_threadPool[i]->join();
+		}
 	}
 
-	m_eventVar.notify_all();
-	for (int i = 0; i < m_numThreads; i++)
+	int ThreadPool::getNumThreads()
 	{
-		m_threadPool[i]->join();
+		return m_numThreads;
 	}
-}
-
-int MyEngine::ThreadPool::getNumThreads()
-{
-	return m_numThreads;
 }
 

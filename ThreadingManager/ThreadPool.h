@@ -6,7 +6,7 @@
 #include <thread>
 #include <future>
 
-namespace MyEngine
+namespace MyThreading
 {
 	class ThreadPool
 	{
